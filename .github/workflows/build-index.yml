@@ -32,9 +32,9 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add index.json
+          git add index.json scripts/translations.json
           if git diff --cached --quiet; then
-            echo "index.json 无变化，跳过提交"
+            echo "index.json/translations.json 无变化，跳过提交"
           else
             git commit -m "chore: rebuild market index $(date -u +%Y-%m-%dT%H:%M:%SZ)"
             git push

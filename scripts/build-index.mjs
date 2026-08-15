@@ -11,7 +11,8 @@
  *
  * 合并策略：存量条目（手动精选）优先保留，官方 Registry 同键条目回填
  * updatedAt/version；官方 > Smithery > GitHub 去重。
- * 输出前复刻客户端 isValidEntry（electron/codex/market-index.ts）自校验。
+ * 输出前复刻客户端 isValidEntry（electron/codex/market-index.ts）自校验，
+ * 并为每条描述补 descriptionZh（免费 Google 翻译 + translations.json 增量缓存，失败保持原文）。
  */
 
 import { readFileSync, writeFileSync } from 'node:fs'
@@ -94,6 +95,31 @@ async function httpJson(url, { headers = {}, retries = 2 } = {}) {
   throw lastErr
 }
 
+/** 带限流感知的 JSON 请求：403 按 Retry-After（缺省 60s）退避重试，仍失败抛错由调用方降级 */
+async function httpJsonRate(url, { headers = {}, retries = 2 } = {}) {
+  let lastErr
+  for (let i = 0; i <= retries; i++) {
+    try {
+      const res = await fetch(url, {
+        headers: { 'User-Agent': USER_AGENT, Accept: 'application/json', ...headers },
+        signal: AbortSignal.timeout(TIMEOUT_MS)
+      })
+      if (res.status === 403) {
+        lastErr = new Error(`HTTP 403: ${url}`)
+        const retryAfter = Number(res.headers.get('retry-after'))
+        await sleep(Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 60_000)
+        continue
+      }
+      if (!res.ok) throw new Error(`HTTP ${res.status}: ${url}`)
+      return await res.json()
+    } catch (err) {
+      lastErr = err
+      if (i < retries) await sleep(1200 * (i + 1))
+    }
+  }
+  throw lastErr
+}
+
 async function httpText(url, { retries = 2 } = {}) {
   let lastErr
   for (let i = 0; i <= retries; i++) {
@@ -131,6 +157,99 @@ const toEpoch = (iso) => {
   if (typeof iso !== 'string') return undefined
   const t = Date.parse(iso)
   return Number.isFinite(t) ? Math.floor(t / 1000) : undefined
+}
+
+/* ================= 描述中文化（免费 Google 翻译接口 + scripts/translations.json 增量缓存） =================
+ * 已中文描述原样；未命中缓存调用 client=gtx 免费接口翻译并写回缓存，
+ * 之后每次构建只翻译新增条目（幂等），失败降级保持英文原文（客户端回退展示）。
+ */
+const TRANSLATIONS_PATH = join(ROOT, 'scripts', 'translations.json')
+const GOOGLE_TL = 'https://translate.googleapis.com/translate_a/single'
+const HAN_RE = /[\u3400-\u9fff]/
+const TRANSLATE_CONCURRENCY = 3
+const TRANSLATE_INTERVAL_MS = 150
+
+function hasChinese(text) {
+  return typeof text === 'string' && HAN_RE.test(text)
+}
+
+function readTranslations() {
+  try {
+    const raw = JSON.parse(readFileSync(TRANSLATIONS_PATH, 'utf8'))
+    if (raw && typeof raw === 'object' && !Array.isArray(raw)) return raw
+  } catch {
+    /* 首次运行无缓存 */
+  }
+  return {}
+}
+
+function writeTranslations(cache) {
+  writeFileSync(TRANSLATIONS_PATH, JSON.stringify(cache, null, 2) + '\n')
+}
+
+/** 免费 Google 翻译（client=gtx 无需 key），失败或结果为空返回 null；429/5xx 退避重试 */
+async function googleTranslate(text, retries = 2) {
+  const url = `${GOOGLE_TL}?client=gtx&sl=en&tl=zh-CN&dt=t&q=${encodeURIComponent(text)}`
+  for (let i = 0; i <= retries; i++) {
+    try {
+      const res = await fetch(url, {
+        headers: { 'User-Agent': USER_AGENT },
+        signal: AbortSignal.timeout(TIMEOUT_MS)
+      })
+      if (res.status === 429) {
+        await sleep(1500 * (i + 1))
+        continue
+      }
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const data = await res.json()
+      const zh = (Array.isArray(data?.[0]) ? data[0] : [])
+        .map((seg) => (Array.isArray(seg) ? String(seg[0]) : ''))
+        .join('')
+        .trim()
+      return zh || null
+    } catch {
+      if (i < retries) await sleep(1200 * (i + 1))
+    }
+  }
+  return null
+}
+
+/** 逐条补上 descriptionZh（已中文原样 / 缓存命中 / 翻译新条目并写回缓存） */
+async function localizeDescriptions(entries) {
+  const cache = readTranslations()
+  const stat = { alreadyChinese: 0, cached: 0, translated: 0, failed: 0, done: 0 }
+
+  await mapLimit(entries, TRANSLATE_CONCURRENCY, async (entry) => {
+    if (hasChinese(entry.description)) {
+      entry.descriptionZh = entry.description
+      stat.alreadyChinese++
+    } else if (!entry.description) {
+      stat.failed++ // 空描述无翻译价值，保持无 descriptionZh（客户端回退英文）
+    } else {
+      const cached = cache[entry.id]
+      if (typeof cached === 'string' && cached) {
+        entry.descriptionZh = cached
+        stat.cached++
+      } else {
+        await sleep(TRANSLATE_INTERVAL_MS)
+        const zh = await googleTranslate(entry.description)
+        if (zh) {
+          cache[entry.id] = zh
+          entry.descriptionZh = zh
+          stat.translated++
+          if (stat.translated % 50 === 0) writeTranslations(cache) // 增量落盘防中断丢进度
+        } else {
+          stat.failed++
+        }
+      }
+    }
+    if (++stat.done % 100 === 0) {
+      console.log(`[build-index] 描述中文化进度: ${stat.done}/${entries.length}（新翻译 ${stat.translated}，失败 ${stat.failed}）`)
+    }
+  })
+  writeTranslations(cache)
+  console.log(`[build-index] 描述中文化: 已中文 ${stat.alreadyChinese} / 缓存命中 ${stat.cached} / 新翻译 ${stat.translated} / 失败保持原文 ${stat.failed} -> ${TRANSLATIONS_PATH}`)
+  return entries
 }
 
 /* ================= 中文分类（对齐客户端 CATEGORY_LABELS，兜底"自定义"） ================= */
@@ -282,13 +401,18 @@ async function fetchGitHub() {
   const headers = token ? { Authorization: `Bearer ${token}` } : {}
   const repos = []
   const pages = Math.ceil(GITHUB_TOP_N / 100)
-  for (let page = 1; page <= pages; page++) {
-    const q = new URLSearchParams({ q: 'topic:mcp-server', sort: 'stars', order: 'desc', per_page: '100', page: String(page) })
-    const data = await httpJson(`${GITHUB_SEARCH}?${q}`, { headers })
-    const items = data.items ?? []
-    for (const r of items) repos.push(r)
-    if (items.length < 100) break
-    if (page < pages) await sleep(token ? 2500 : 7000) // 限流：30/min 与 10/min
+  try {
+    for (let page = 1; page <= pages; page++) {
+      const q = new URLSearchParams({ q: 'topic:mcp-server', sort: 'stars', order: 'desc', per_page: '100', page: String(page) })
+      const data = await httpJsonRate(`${GITHUB_SEARCH}?${q}`, { headers })
+      const items = data.items ?? []
+      for (const r of items) repos.push(r)
+      if (items.length < 100) break
+      if (page < pages) await sleep(token ? 2500 : 7000) // 限流：30/min 与 10/min
+    }
+  } catch (err) {
+    console.warn(`[build-index] GitHub 源降级（跳过，其余源继续）: ${err.message}`)
+    return { entries: [], raw: repos.length, dropped: { noDesc: 0, noReadme: 0, noInstall: 0, verifyFail: 0 } }
   }
   const top = repos.slice(0, GITHUB_TOP_N)
 
@@ -463,6 +587,7 @@ async function main() {
   const valid = merged.filter(isValidEntry)
   const dropped = merged.length - valid.length
 
+  await localizeDescriptions(valid)
   writeFileSync(INDEX_PATH, JSON.stringify({ entries: valid }, null, 2) + '\n')
 
   console.log('[build-index] ===== 构建统计 =====')
