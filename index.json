@@ -1,0 +1,50 @@
+{
+  "entries": [
+    {
+      "id": "registry:postgres",
+      "name": "PostgreSQL",
+      "description": "连接并查询 PostgreSQL 数据库",
+      "category": "数据库",
+      "icon": "🐘",
+      "source": "registry",
+      "packageName": "@modelcontextprotocol/server-postgres",
+      "packageType": "npm",
+      "verified": true,
+      "updatedAt": 1755273600
+    },
+    {
+      "id": "registry:jira",
+      "name": "Jira",
+      "description": "管理敏捷开发任务、Sprint 和工作流",
+      "category": "项目管理",
+      "icon": "📋",
+      "source": "registry",
+      "url": "https://mcp.atlassian.com",
+      "verified": true,
+      "updatedAt": 1755273600
+    },
+    {
+      "id": "registry:linear",
+      "name": "Linear",
+      "description": "管理 Linear 项目中的工单和迭代",
+      "category": "项目管理",
+      "icon": "🔶",
+      "source": "registry",
+      "packageName": "@linear/mcp-server",
+      "packageType": "npm",
+      "verified": true,
+      "updatedAt": 1755273600
+    },
+    {
+      "id": "registry:slack",
+      "name": "Slack",
+      "description": "发送消息、搜索频道和管理工作空间",
+      "category": "通讯协作",
+      "icon": "💬",
+      "source": "registry",
+      "url": "https://mcp.slack.com",
+      "verified": true,
+      "updatedAt": 1755273600
+    }
+  ]
+}
