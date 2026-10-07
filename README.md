@@ -11,7 +11,7 @@ MindOS 插件市场索引。由客户端 `https://xxcr777.github.io/mindos-mcp-i
 | 手动精选 `scripts/manual.json` | 4 | 人工维护的精选条目（中文描述/icon 优先，官方同键条目仅回填 `updatedAt`/`version`） |
 | 官方 MCP Registry | 1500 | `registry.modelcontextprotocol.io`，开放注册表（实测 2 万+ 条目、无流行度指标），按 `updatedAt` 最新优先截取；剔除无安装形态的条目 |
 | Smithery | ~123 | `registry.smithery.ai`，分页有服务端漂移 bug（page>10 后大量重复，offset/limit/sort 参数无效），全量翻取后按 `qualifiedName` 去重，实际唯一条目约 123 |
-| GitHub | ~110 | `topic:mcp-server` 按 stars 截取 top 300，raw README 解析 npx/uvx/docker 安装形态，npm/pypi 包做存在性校验，失败条目剔除 |
+| GitHub | 目标 1000（`stars>100`） | 热门 MCP 仓库双通道：① 搜索矩阵（`topic:mcp-server/mcp-servers/model-context-protocol/anthropic-mcp/claude-mcp` + `mcp in:name` + `"mcp server" in:name`，各 stars 排序翻页）；② awesome 列表（白名单 + 自动发现 `awesome-mcp in:name`，解析 README 仓库链接、GraphQL 批量补元数据）。README 解析支持 MCP JSON 配置块 / npx / uvx / docker / 远程 url，另以「包名=仓库名」同名包探测兜底；npm/pypi 存在性校验。**MCP 相关性严格判定**：docker 镜像/包名/远程 url/包 keywords 必须证明目标本身是 MCP（大工具蹭 topics 不收录）。增量缓存 `scripts/github-cache.json`：`pushedAt` 未变即跳过解析，日常构建分钟级 |
 
 合并去重键：`packageName` 优先，其次 `url`，最后 `id`；先入为主，冲突时官方条目回填 `updatedAt`/`version`/`registryUrl`（不覆盖 icon 与中文描述）。
 
@@ -27,21 +27,29 @@ MindOS 插件市场索引。由客户端 `https://xxcr777.github.io/mindos-mcp-i
 | `source` | 是 | 来源渠道：`registry` / `smithery` / `github` |
 | `packageName` / `packageType` | 二选一 | 下载型插件（npm/pypi/docker），客户端用 npx/uvx/docker 安装 |
 | `url` | 二选一 | 远程插件（streamable-http 地址），无需下载 |
-| `useCount` | 否 | Smithery 安装次数，客户端用于排序 |
+| `useCount` | 否 | 流行度：Smithery 安装次数 / GitHub stars（客户端用于排序） |
+| `stars` | 否 | GitHub stars（`useCount` 同步写入；供未来星标展示） |
 | `verified` | 否 | 是否官方/已验证 |
 | `version` | 否 | 版本号（官方 Registry） |
-| `updatedAt` | 否 | 更新时间（epoch 秒），客户端用于更新检测 |
+| `updatedAt` | 否 | 更新时间（epoch 秒），客户端用于更新检测；GitHub 条目取 npm/pypi 包最后发布时间（非 pushed_at，避免误报） |
 | `registryUrl` | 否 | 来源主页/仓库地址（详情页用） |
 
 ## 本地构建
 
 ```bash
-# 可选：GitHub API token（匿名 10 req/min 限流，约 2 分钟）
-# 推荐设为环境变量 GITHUB_TOKEN（30 req/min，构建更快更稳）
+# 测试（零依赖：node:test）
+node --test "scripts/**/*.test.mjs"
+
+# 可选：GitHub API token（匿名 10 req/min 限流；推荐设为环境变量 GITHUB_TOKEN，30 req/min 构建更快更稳）
 node scripts/build-index.mjs
+
+# 调试参数：--dry-run（只统计不写文件）/ --source=github|registry|smithery（仅跑指定源）/ --limit=N（试跑限量）
+node scripts/build-index.mjs --source=github --dry-run --limit=100
 ```
 
-产物 `index.json` 由脚本全量覆盖；手动精选条目请编辑 `scripts/manual.json`（不要直接改 `index.json`，避免被下次构建覆盖）。
+产物 `index.json` 由脚本全量覆盖（合并结果不足现有索引一半时拒绝写盘，防事故性覆盖）；手动精选条目请编辑 `scripts/manual.json`（不要直接改 `index.json`，避免被下次构建覆盖）。
+
+> 本地网络提示：raw.githubusercontent.com 在部分网络环境下不可达，需配置代理（`HTTPS_PROXY` + `NODE_USE_ENV_PROXY=1`）；CI 环境直连。
 
 ## 描述中文化（自动翻译）
 
@@ -56,7 +64,7 @@ node scripts/build-index.mjs
 
 ## 自动构建
 
-`.github/workflows/build-index.yml`：每日 08:00 UTC 定时 + 手动触发（workflow_dispatch），构建后提交 `index.json` 与 `scripts/translations.json` 回 `main`，触发 GitHub Pages 自动发布。
+`.github/workflows/build-index.yml`：每日 08:00 UTC 定时 + 手动触发（workflow_dispatch）；先跑 `node --test` 测试，再构建，提交 `index.json`、`scripts/translations.json` 与增量缓存 `scripts/github-cache.json` 回 `main`，触发 GitHub Pages 自动发布。
 
 ## 发布方式
 
