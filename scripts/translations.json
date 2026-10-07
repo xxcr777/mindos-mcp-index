@@ -22394,5 +22394,7 @@
   "github:jordanrendric/claude-video-vision": "让 Claude 能够观看和理解视频 — 具有帧提取和多模态音频分析功能的 Claude Code 插件",
   "registry:com.cve-security/cve-intelligence": "CVE情报：利用（KEV/EPSS）、检测覆盖范围、固定版本、CPE配置。",
   "registry:com.realevr.estates/estates": "通过 360° 虚拟游览搜索非洲的真实房屋（出租、BnB、出售、银行出售）。",
-  "github:20000419/fauxnix": "通过确定性 bash→PowerShell 转换在 Windows 上运行 Linux 风格的命令。没有虚拟机，没有 WSL。 MCP 服务器 + 为 AI 代理构建的 CLI（Claude Code、Codex、OpenCode...）。 GNU 风格的输出、bash 风格的错误、UTF-8/GBK 处理。"
+  "github:20000419/fauxnix": "通过确定性 bash→PowerShell 转换在 Windows 上运行 Linux 风格的命令。没有虚拟机，没有 WSL。 MCP 服务器 + 为 AI 代理构建的 CLI（Claude Code、Codex、OpenCode...）。 GNU 风格的输出、bash 风格的错误、UTF-8/GBK 处理。",
+  "github:Scottcjn/rustchain-mcp": "RustChain 生态系统中 AI 代理的 MCP 服务器：RTC 信用钱包和签名转账、赏金发现、BoTTube 视频发布和 Beacon 代理到代理消息传递。基于 createkr 的 RustChain SDK 构建。",
+  "github:redf0x1/camofox-mcp": "适用于 AI 代理的反检测浏览器 MCP 服务器 — 在不被阻止的情况下导航、交互和自动化网络"
 }
