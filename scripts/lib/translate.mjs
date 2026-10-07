@@ -9,6 +9,8 @@ const GOOGLE_TL = 'https://translate.googleapis.com/translate_a/single'
 const HAN_RE = /[\u3400-\u9fff]/
 const TRANSLATE_CONCURRENCY = 3
 const TRANSLATE_INTERVAL_MS = 150
+/** 熔断阈值：连续失败 N 次后本轮放弃翻译（避免对不可用接口无效重试数十分钟） */
+export const TRANSLATE_FAIL_BREAKER = 8
 
 export function hasChinese(text) {
   return typeof text === 'string' && HAN_RE.test(text)
@@ -55,10 +57,18 @@ export async function googleTranslate(text, retries = 2) {
   return null
 }
 
-/** 逐条补上 descriptionZh（已中文原样 / 缓存命中 / 翻译新条目并写回缓存） */
-export async function localizeDescriptions(entries, translationsPath, log = console.log) {
+/** 逐条补上 descriptionZh（已中文原样 / 缓存命中 / 翻译新条目并写回缓存）。
+ *  连续失败达 TRANSLATE_FAIL_BREAKER 时熔断：剩余条目本轮保持英文（下轮构建重试）。 */
+export async function localizeDescriptions(
+  entries,
+  translationsPath,
+  log = console.log,
+  translateFn = googleTranslate
+) {
   const cache = readTranslations(translationsPath)
-  const stat = { alreadyChinese: 0, cached: 0, translated: 0, failed: 0, done: 0 }
+  const stat = { alreadyChinese: 0, cached: 0, translated: 0, failed: 0, skippedByBreaker: 0, done: 0 }
+  let consecutiveFailures = 0
+  let breakerOpen = false
 
   await mapLimit(entries, TRANSLATE_CONCURRENCY, async (entry) => {
     if (hasChinese(entry.description)) {
@@ -71,16 +81,26 @@ export async function localizeDescriptions(entries, translationsPath, log = cons
       if (typeof cached === 'string' && cached) {
         entry.descriptionZh = cached
         stat.cached++
+      } else if (breakerOpen) {
+        stat.skippedByBreaker++
       } else {
         await sleep(TRANSLATE_INTERVAL_MS)
-        const zh = await googleTranslate(entry.description)
+        const zh = await translateFn(entry.description)
         if (zh) {
+          consecutiveFailures = 0
           cache[entry.id] = zh
           entry.descriptionZh = zh
           stat.translated++
           if (stat.translated % 50 === 0) writeTranslations(translationsPath, cache) // 增量落盘防中断丢进度
         } else {
           stat.failed++
+          consecutiveFailures++
+          if (consecutiveFailures >= TRANSLATE_FAIL_BREAKER && !breakerOpen) {
+            breakerOpen = true
+            log(
+              `[build-index] 描述翻译连续失败 ${consecutiveFailures} 次：本轮熔断，剩余新条目保持英文原文（不写缓存，下轮构建重试）`
+            )
+          }
         }
       }
     }
@@ -90,7 +110,7 @@ export async function localizeDescriptions(entries, translationsPath, log = cons
   })
   writeTranslations(translationsPath, cache)
   log(
-    `[build-index] 描述中文化: 已中文 ${stat.alreadyChinese} / 缓存命中 ${stat.cached} / 新翻译 ${stat.translated} / 失败保持原文 ${stat.failed} -> ${translationsPath}`
+    `[build-index] 描述中文化: 已中文 ${stat.alreadyChinese} / 缓存命中 ${stat.cached} / 新翻译 ${stat.translated} / 失败保持原文 ${stat.failed} / 熔断跳过 ${stat.skippedByBreaker} -> ${translationsPath}`
   )
   return entries
 }
